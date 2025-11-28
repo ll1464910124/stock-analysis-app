@@ -665,7 +665,7 @@ def get_indicator_status(value, indicator_type, comparison_value=None):
         return "⚪", "unknown"
 
 def display_technical_indicators_table(df):
-    """显示技术指标表格 - 使用Streamlit原生DataFrame样式"""
+    """显示技术指标表格 - 带同步滚动和冻结列"""
     st.subheader("📊 技术指标详细分析")
     
     # 获取最近22个交易日的数据（一个月）
@@ -769,12 +769,20 @@ def display_technical_indicators_table(df):
     # 创建表格数据 - 真正的横向日期排列
     table_data = []
     
+    # 添加表头行
+    header_row = ['指标']
+    for date in recent_data.index:
+        date_str = date.strftime('%m-%d')
+        header_row.extend([f'{date_str} 数值', f'{date_str} 状态'])
+    
+    table_data.append(header_row)
+    
     # 为每个选中的指标添加行
     for indicator_name, config in selected_indicators.items():
         if config['column'] not in recent_data.columns:
             continue
             
-        row_data = {'指标': indicator_name}
+        row_data = [indicator_name]
         
         for date in recent_data.index:
             value = recent_data.loc[date, config['column']]
@@ -789,91 +797,86 @@ def display_technical_indicators_table(df):
             else:
                 status_emoji, status_type = get_indicator_status(value, config['type'])
             
-            # 添加数值和状态 - 使用日期作为列名
-            date_str = date.strftime('%m-%d')
-            row_data[f'{date_str} 数值'] = formatted_value
-            row_data[f'{date_str} 状态'] = status_emoji
+            # 添加数值和状态
+            row_data.extend([formatted_value, status_emoji])
         
         table_data.append(row_data)
     
     # 创建DataFrame并显示
-    if table_data:
-        display_df = pd.DataFrame(table_data)
+    if len(table_data) > 1:
+        # 创建DataFrame - 第一行是表头，其余是数据
+        display_df = pd.DataFrame(table_data[1:], columns=table_data[0])
         
-        # 使用Streamlit原生DataFrame显示，保持Excel样式
-        st.dataframe(display_df, use_container_width=True, height=min(600, len(selected_indicators) * 35 + 100))
+        # 添加CSS样式实现同步滚动和冻结列
+        st.markdown("""
+        <style>
+        .fixed-column-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .fixed-column-table th, .fixed-column-table td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: center;
+            white-space: nowrap;
+        }
+        .fixed-column-table thead {
+            background-color: #f2f2f2;
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+        .fixed-column-table thead tr th:first-child,
+        .fixed-column-table tbody tr td:first-child {
+            position: sticky;
+            left: 0;
+            background-color: #f2f2f2;
+            z-index: 5;
+            min-width: 120px;
+        }
+        .fixed-column-table-container {
+            overflow-x: auto;
+            max-width: 100%;
+            max-height: 600px;
+            border: 1px solid #ddd;
+        }
+        </style>
+        """, unsafe_allow_html=True)
+        
+        # 将DataFrame转换为HTML表格
+        html_table = display_df.to_html(classes='fixed-column-table', index=False, escape=False)
+        
+        # 包装在可滚动容器中
+        html_content = f"""
+        <div class="fixed-column-table-container">
+            {html_table}
+        </div>
+        """
+        
+        # 显示表格
+        st.markdown(html_content, unsafe_allow_html=True)
         
         # 显示颜色说明
         st.write("**颜色说明**: 🟢 积极信号 | 🔴 消极信号 | 🟡 中性信号 | ⚪ 未知状态")
         
-        # 添加同步滚动功能的CSS和JavaScript
+        # 添加JavaScript实现同步滚动
         st.markdown("""
-        <style>
-        /* 确保表格容器有滚动条 */
-        .stDataFrame {
-            overflow-x: auto;
-        }
-        
-        /* 为表格添加边框样式，更像Excel */
-        .stDataFrame table {
-            border-collapse: collapse;
-            border-spacing: 0;
-        }
-        
-        .stDataFrame th, .stDataFrame td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: center;
-        }
-        
-        .stDataFrame th {
-            background-color: #f2f2f2;
-            position: sticky;
-            top: 0;
-        }
-        
-        /* 第一列特殊样式 */
-        .stDataFrame th:first-child,
-        .stDataFrame td:first-child {
-            background-color: #f8f9fa;
-            font-weight: bold;
-            position: sticky;
-            left: 0;
-            z-index: 1;
-        }
-        </style>
-        
         <script>
-        // 同步滚动功能
-        function syncScroll() {
-            const tables = document.querySelectorAll('.stDataFrame');
-            const plots = document.querySelectorAll('.js-plotly-plot');
-            
-            // 为所有表格和图表添加滚动监听
-            [...tables, ...plots].forEach(element => {
-                element.addEventListener('scroll', function(e) {
-                    const scrollLeft = e.target.scrollLeft;
-                    
-                    // 同步所有元素的滚动位置
-                    [...tables, ...plots].forEach(otherElement => {
-                        if (otherElement !== e.target) {
-                            otherElement.scrollLeft = scrollLeft;
-                        }
-                    });
+        // 获取所有可滚动容器
+        const containers = document.querySelectorAll('.fixed-column-table-container, .js-plotly-plot');
+        
+        // 为每个容器添加滚动事件监听器
+        containers.forEach(container => {
+            container.addEventListener('scroll', function(e) {
+                const scrollLeft = e.target.scrollLeft;
+                // 同步所有容器的滚动位置
+                containers.forEach(otherContainer => {
+                    if (otherContainer !== e.target) {
+                        otherContainer.scrollLeft = scrollLeft;
+                    }
                 });
             });
-        }
-        
-        // 页面加载后执行同步滚动设置
-        if (document.readyState === 'loading') {
-            document.addEventListener('DOMContentLoaded', syncScroll);
-        } else {
-            syncScroll();
-        }
-        
-        // 监听Streamlit的内容变化
-        const observer = new MutationObserver(syncScroll);
-        observer.observe(document.body, { childList: true, subtree: true });
+        });
         </script>
         """, unsafe_allow_html=True)
     else:
